@@ -446,8 +446,8 @@ contract DepositCashierV2 is StandardModule, EIP712, ReentrancyGuard {
     // log_id => log info
     mapping(uint => LogInfo) private logs;
 
-    // nonce => used (single-use deposit authorizations, replay protection)
-    mapping(uint => bool) public used_nonce;
+    // buyer => nonce => used (single-use per-buyer deposit authorizations)
+    mapping(address => mapping(uint => bool)) public used_nonce;
 
     // token => allowed for deposit (vetted no-fee / non-rebasing tokens only)
     mapping(address => bool) public allowed_token;
@@ -500,7 +500,7 @@ contract DepositCashierV2 is StandardModule, EIP712, ReentrancyGuard {
         if (!allowed_token[params.token]) revert TokenNotAllowed();
         if (params.amount == 0) revert InvalidAmount();
         if (params.exp < block.timestamp) revert DepositExpired();
-        if (used_nonce[params.nonce]) revert NonceUsed();
+        if (used_nonce[msg.sender][params.nonce]) revert NonceUsed();
 
         bytes32 structHash = keccak256(
             abi.encode(
@@ -518,10 +518,10 @@ contract DepositCashierV2 is StandardModule, EIP712, ReentrancyGuard {
             revert InvalidSignature();
         }
 
-        // Effects before interaction (CEI): burn the nonce, record the log and
-        // bump the counter before pulling tokens, so state stays consistent even
-        // if the reentrancy guard is ever removed in a future refactor.
-        used_nonce[params.nonce] = true;
+        // Effects before interaction (CEI): burn the buyer's nonce, record the
+        // log and bump the counter before pulling tokens, so state stays
+        // consistent even if the reentrancy guard is ever removed later.
+        used_nonce[msg.sender][params.nonce] = true;
         uint id = log_id;
         logs[id] = LogInfo(
             params.user_id,
